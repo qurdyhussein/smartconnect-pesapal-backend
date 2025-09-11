@@ -3,8 +3,7 @@ services:
     name: smartconnect-pesapal-api
     env: python
     buildCommand: "pip install -r requirements.txt"
-    pythonVersion: 3.11
-    startCommand: gunicorn config.wsgi:application
+    startCommand: bash -c "python manage.py migrate && gunicorn config.wsgi:application"
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
