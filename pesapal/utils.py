@@ -29,8 +29,8 @@ def update_booking_status(reference, status_data):
         print(f"⚠️ Booking with reference {reference} not found.")
 
 
-def query_pesapal_payment_status(order_tracking_id):
-    booking = Booking.objects.filter(order_tracking_id=order_tracking_id).first()
+def query_pesapal_payment_status(reference):
+    booking = Booking.objects.filter(reference=reference).first()
     if not booking:
         return "not_found"
 
