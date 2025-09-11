@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .utils import update_booking_status  # Ensure utils.py exists and is imported correctly
+from django.http import JsonResponse
+from .utils import query_pesapal_payment_status
 
 load_dotenv()
 
@@ -142,3 +144,12 @@ def pesapal_ipn(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=500)
+
+
+def check_payment_status(request, order_tracking_id):
+    status = query_pesapal_payment_status(order_tracking_id)
+
+    return JsonResponse({
+        "order_tracking_id": order_tracking_id,
+        "status": status
+    })
