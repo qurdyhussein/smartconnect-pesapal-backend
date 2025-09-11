@@ -62,7 +62,7 @@ def submit_order_request(request):
             "currency": "TZS",
             "description": "SmartConnect Ticket",
             "type": "MERCHANT",
-            "merchant_reference": merchant_reference,
+            "reference": f"SC{int(time.time() * 1000)}",
             "phone_number": phone,
             "email": "user@example.com",
             "callback_url": "https://smartconnect-pesapal-api.onrender.com/ipn/"
