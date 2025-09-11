@@ -32,6 +32,9 @@ def submit_order_request(request):
         data = request.data
         phone = data.get("phone")
         amount = data.get("amount")
+        email = data.get("email", "user@example.com")
+        first_name = data.get("first_name", "Smart")
+        last_name = data.get("last_name", "Connect")
 
         # Step 1: Get token
         token_res = requests.post(
@@ -55,17 +58,22 @@ def submit_order_request(request):
             "Accept": "application/json"
         }
 
-        merchant_reference = f"SC{int(time.time() * 1000)}"
+        order_id = f"SC{int(time.time() * 1000)}"
+        notification_id = os.getenv("PESAPAL_NOTIFICATION_ID")  # Must be set in .env
 
         body = {
-            "amount": str(amount),
+            "id": order_id,
             "currency": "TZS",
+            "amount": float(amount),
             "description": "SmartConnect Ticket",
-            "type": "MERCHANT",
-            "reference": f"SC{int(time.time() * 1000)}",
-            "phone_number": phone,
-            "email": "user@example.com",
-            "callback_url": "https://smartconnect-pesapal-api.onrender.com/ipn/"
+            "callback_url": "https://smartconnect-pesapal-api.onrender.com/ipn/",
+            "notification_id": notification_id,
+            "billing_address": {
+                "email_address": email,
+                "phone_number": phone,
+                "country_code": "TZ"
+                
+            }
         }
 
         print("📦 Request body to Pesapal:", json.dumps(body, indent=2))
