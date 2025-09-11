@@ -5,9 +5,8 @@ import json
 from dotenv import load_dotenv
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .utils import update_booking_status  # Ensure utils.py exists and is imported correctly
 from django.http import JsonResponse
-from .utils import query_pesapal_payment_status
+from .utils import update_booking_status, query_pesapal_payment_status
 
 load_dotenv()
 
@@ -129,7 +128,10 @@ def pesapal_ipn(request):
             "Accept": "application/json"
         }
 
-        status_url = f"https://pay.pesapal.com/v3/api/Transactions/GetTransactionStatus?order_tracking_id={tracking_id}&merchant_reference={merchant_reference}"
+        status_url = (
+            f"https://pay.pesapal.com/v3/api/Transactions/GetTransactionStatus"
+            f"?order_tracking_id={tracking_id}&merchant_reference={merchant_reference}"
+        )
 
         res = requests.get(status_url, headers=headers)
         res.raise_for_status()
@@ -146,10 +148,14 @@ def pesapal_ipn(request):
         return Response({"error": str(e)}, status=500)
 
 
-def check_payment_status(request, order_tracking_id):
-    status = query_pesapal_payment_status(order_tracking_id)
-
-    return JsonResponse({
-        "order_tracking_id": order_tracking_id,
-        "status": status
-    })
+# ✅ Step 4: Status Check Endpoint
+@api_view(['GET'])
+def check_payment_status(request, reference):
+    try:
+        status = query_pesapal_payment_status(reference)
+        return JsonResponse({
+            "reference": reference,
+            "status": status
+        })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
