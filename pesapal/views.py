@@ -55,24 +55,33 @@ def submit_order_request(request):
             "Accept": "application/json"
         }
 
+        merchant_reference = f"SC{int(time.time() * 1000)}"
+
         body = {
             "amount": str(amount),
             "currency": "TZS",
             "description": "SmartConnect Ticket",
             "type": "MERCHANT",
-            "merchant_reference": f"SC{int(time.time() * 1000)}",
+            "merchant_reference": merchant_reference,
             "phone_number": phone,
             "email": "user@example.com",
             "callback_url": "https://smartconnect-pesapal-api.onrender.com/ipn/"
         }
+
+        print("📦 Request body to Pesapal:", json.dumps(body, indent=2))
 
         res = requests.post(
             "https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
             headers=headers,
             json=body
         )
+
+        print("📥 Raw response from Pesapal:", res.text)
+
         res.raise_for_status()
         return Response(res.json())
 
+    except requests.exceptions.HTTPError as http_err:
+        return Response({"error": f"HTTP error: {str(http_err)}"}, status=500)
     except Exception as e:
         return Response({"error": str(e)}, status=500)
