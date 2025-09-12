@@ -16,8 +16,25 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.http import JsonResponse
+from django.core.management import call_command
+
+
+def run_migrate(request):
+    try:
+        call_command('migrate')
+        return JsonResponse({'message': 'Migration completed successfully'})
+    except Exception as e:
+        return JsonResponse({'error': str(e)
+                             })
 
 urlpatterns = [
+    path('force-migrate/', run_migrate),
     path('admin/', admin.site.urls),
     path('', include('pesapal.urls')),
 ]
+
+
+
+
+
