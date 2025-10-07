@@ -1,9 +1,8 @@
 from django.urls import path
-from .views import get_token, submit_order_request, pesapal_ipn, check_payment_status
+from .views import initiate_zenopay_payment, zenopay_webhook, check_zenopay_status
 
 urlpatterns = [
-    path("get-token/", get_token),
-    path("submit-order-request/", submit_order_request),
-    path("pesapal-ipn/", pesapal_ipn),
-    path('check-payment-status/<str:reference>/', check_payment_status),
+    path("zenopay/initiate/", initiate_zenopay_payment),
+    path("zenopay/webhook/", zenopay_webhook),
+    path("zenopay/status/<str:order_id>/", check_zenopay_status),
 ]

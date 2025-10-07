@@ -31,7 +31,7 @@ def run_migrate(request):
 urlpatterns = [
     path('force-migrate/', run_migrate),
     path('admin/', admin.site.urls),
-    path('', include('pesapal.urls')),
+    path('api/', include('pesapal.urls')),
 ]
 
 

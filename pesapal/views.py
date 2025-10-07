@@ -1,161 +1,123 @@
 import os
-import time
-import requests
+import uuid
 import json
+import requests
 from dotenv import load_dotenv
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import JsonResponse
-from .utils import update_booking_status, query_pesapal_payment_status
+from .utils import update_booking_status, query_zenopay_payment_status
 
 load_dotenv()
 
-# 🔐 Step 1: Get Pesapal Token
+ZENOPAY_API_KEY = os.getenv("ZENOPAY_API_KEY")
+WEBHOOK_SECRET = os.getenv("ZENOPAY_API_KEY")  # Same key used to verify webhook
+
+# 🧾 Step 1: Initiate Zenopay Payment
 @api_view(['POST'])
-def get_token(request):
-    url = "https://pay.pesapal.com/v3/api/Auth/RequestToken"
-    payload = {
-        "consumer_key": os.getenv("PESAPAL_CONSUMER_KEY"),
-        "consumer_secret": os.getenv("PESAPAL_CONSUMER_SECRET"),
-    }
-    headers = {"Content-Type": "application/json"}
-
-    try:
-        res = requests.post(url, json=payload, headers=headers)
-        res.raise_for_status()
-        token = res.json().get("token")
-        return Response({"token": token})
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
-
-
-# 🧾 Step 2: Submit Order Request
-@api_view(['POST'])
-def submit_order_request(request):
+def initiate_zenopay_payment(request):
     try:
         data = request.data
         phone = data.get("phone")
         amount = data.get("amount")
-        email = data.get("email", "user@example.com")
-        first_name = data.get("first_name", "Smart")
-        last_name = data.get("last_name", "Connect")
+        buyer_name = data.get("buyer_name", "SmartConnect User")
+        buyer_email = data.get("buyer_email", "user@smartconnect.tz")
+        customer_id = data.get("customer_id", "unknown")
 
-        token_res = requests.post(
-            "https://pay.pesapal.com/v3/api/Auth/RequestToken",
-            headers={"Content-Type": "application/json"},
-            json={
-                "consumer_key": os.getenv("PESAPAL_CONSUMER_KEY"),
-                "consumer_secret": os.getenv("PESAPAL_CONSUMER_SECRET"),
-            }
-        )
-        token_res.raise_for_status()
-        token = token_res.json().get("token")
+        if not phone or not amount:
+            return Response({"error": "Missing phone or amount"}, status=400)
 
-        if not token:
-            return Response({"error": "Failed to retrieve token"}, status=500)
+        order_id = str(uuid.uuid4())  # Unique transaction ID
 
         headers = {
-            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
-            "Accept": "application/json"
+            "x-api-key": ZENOPAY_API_KEY
         }
 
-        order_id = f"SC{int(time.time() * 1000)}"
-        notification_id = os.getenv("PESAPAL_NOTIFICATION_ID")
-
-        if not notification_id:
-            return Response({"error": "Missing notification_id"}, status=500)
-
-        body = {
-            "id": order_id,
-            "currency": "TZS",
-            "amount": float(amount),
-            "description": "SmartConnect Ticket",
-            "callback_url": "https://smartconnect-pesapal-api.onrender.com/ipn/",
-            "notification_id": notification_id,
-            "billing_address": {
-                "email_address": email,
-                "phone_number": phone,
-                "country_code": "TZ"
-            }
+        payload = {
+            "order_id": order_id,
+            "buyer_email": buyer_email,
+            "buyer_name": buyer_name,
+            "buyer_phone": phone,
+            "amount": amount,
+            "webhook_url": "https://smartconnect-api.onrender.com/zenopay/webhook"
         }
 
-        print("📦 Request body to Pesapal:", json.dumps(body, indent=2))
+        print("📦 Sending to Zenopay:", json.dumps(payload, indent=2))
 
-        res = requests.post(
-            "https://pay.pesapal.com/v3/api/Transactions/SubmitOrderRequest",
-            headers=headers,
-            json=body
-        )
-
-        print("📥 Raw response from Pesapal:", res.text)
-
+        res = requests.post("https://zenoapi.com/api/payments/mobile_money_tanzania", headers=headers, json=payload)
         res.raise_for_status()
-        return Response(res.json())
+        response_data = res.json()
 
-    except requests.exceptions.HTTPError as http_err:
-        return Response({"error": f"HTTP error: {str(http_err)}"}, status=500)
+        print("📥 Zenopay response:", response_data)
+
+        return Response({
+            "status": "initiated",
+            "order_id": order_id,
+            "zenopay_response": response_data
+        })
+
     except Exception as e:
         return Response({"error": str(e)}, status=500)
 
 
-# 📡 Step 3: IPN Handler
+# 📡 Step 2: Webhook Handler
 @api_view(['POST'])
-def pesapal_ipn(request):
+def zenopay_webhook(request):
     try:
-        print("📨 IPN payload received:", request.data)
+        print("📨 Webhook received:", request.data)
 
-        tracking_id = request.data.get("order_tracking_id")
-        merchant_reference = request.data.get("merchant_reference")
+        # Verify x-api-key header
+        incoming_key = request.headers.get("x-api-key")
+        if incoming_key != WEBHOOK_SECRET:
+            return Response({"error": "Unauthorized webhook"}, status=403)
 
-        if not tracking_id or not merchant_reference:
-            return Response({"error": "Missing tracking_id or merchant_reference"}, status=400)
+        order_id = request.data.get("order_id")
+        status = request.data.get("payment_status_description")
+        method = request.data.get("payment_method")
+        code = request.data.get("confirmation_code")
+        channel = request.data.get("channel")
+        transid = request.data.get("transid")
 
-        token_res = requests.post(
-            "https://pay.pesapal.com/v3/api/Auth/RequestToken",
-            headers={"Content-Type": "application/json"},
-            json={
-                "consumer_key": os.getenv("PESAPAL_CONSUMER_KEY"),
-                "consumer_secret": os.getenv("PESAPAL_CONSUMER_SECRET"),
-            }
-        )
-        token_res.raise_for_status()
-        token = token_res.json().get("token")
+        if not order_id or not status:
+            return Response({"error": "Missing order_id or payment_status"}, status=400)
 
+        update_booking_status(order_id, {
+            "payment_status_description": status,
+            "payment_method": method,
+            "confirmation_code": code,
+            "channel": channel,
+            "transid": transid
+        })
+
+        return Response({"status": "received", "order_id": order_id})
+
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        return Response({"error": "Internal server error"}, status=500)
+
+
+# ✅ Step 3: Manual Status Check
+@api_view(['GET'])
+def check_zenopay_status(request, order_id):
+    try:
         headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
+            "x-api-key": ZENOPAY_API_KEY
         }
 
-        status_url = (
-            f"https://pay.pesapal.com/v3/api/Transactions/GetTransactionStatus"
-            f"?order_tracking_id={tracking_id}&merchant_reference={merchant_reference}"
-        )
-
-        res = requests.get(status_url, headers=headers)
+        url = f"https://zenoapi.com/api/payments/order-status?order_id={order_id}"
+        res = requests.get(url, headers=headers)
         res.raise_for_status()
         status_data = res.json()
 
-        print("📥 IPN status response:", status_data)
+        print("📊 Status check response:", status_data)
 
-        # ✅ Update booking status in DB
-        update_booking_status(merchant_reference, status_data)
-
-        return Response({"status": "received", "data": status_data})
-
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
-
-
-# ✅ Step 4: Status Check Endpoint
-@api_view(['GET'])
-def check_payment_status(request, reference):
-    try:
-        status = query_pesapal_payment_status(reference)
         return JsonResponse({
-            "reference": reference,
-            "status": status
+            "order_id": order_id,
+            "status": status_data.get("result"),
+            "details": status_data.get("data", [])
         })
+
     except Exception as e:
+        print(f"❌ Status check error: {e}")
         return JsonResponse({"error": str(e)}, status=500)
