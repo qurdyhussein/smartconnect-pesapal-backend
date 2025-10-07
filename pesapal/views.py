@@ -44,11 +44,18 @@ def initiate_zenopay_payment(request):
         print("🔑 ZENOPAY_API_KEY:", ZENOPAY_API_KEY)
         print("📦 Sending to Zenopay:", json.dumps(payload, indent=2))
 
-        res = requests.post("https://zenoapi.com/api/payments/mobile_money_tanzania", headers=headers, json=payload)
+        res = requests.post(
+            "https://zenoapi.com/api/payments/mobile_money_tanzania",
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+
+        print("📥 Zenopay raw response:", res.status_code, res.text)
         res.raise_for_status()
         response_data = res.json()
 
-        print("📥 Zenopay response:", response_data)
+        print("✅ Zenopay parsed response:", response_data)
 
         return Response({
             "status": "initiated",
@@ -106,20 +113,28 @@ def check_zenopay_status(request, order_id):
         }
 
         url = f"https://zenoapi.com/api/payments/order-status?order_id={order_id}"
-        res = requests.get(url, headers=headers)
+        res = requests.get(url, headers=headers, timeout=10)
+        print("📊 Raw status response:", res.status_code, res.text)
         res.raise_for_status()
         status_data = res.json()
 
-        print("📊 Status check response:", status_data)
+        print("📊 Parsed status response:", status_data)
 
-        # Normalize Zenopay status
         raw_status = status_data.get("result")
-        normalized_status = "COMPLETED" if raw_status == "SUCCESS" else raw_status
+        details = status_data.get("data", [])
+        payment_status = details[0].get("payment_status") if details else None
+
+        if raw_status == "SUCCESS" and payment_status == "COMPLETED":
+            normalized_status = "COMPLETED"
+        elif payment_status == "PENDING":
+            normalized_status = "PENDING"
+        else:
+            normalized_status = "FAIL"
 
         return JsonResponse({
             "order_id": order_id,
             "status": normalized_status,
-            "details": status_data.get("data", [])
+            "details": details
         })
 
     except Exception as e:
