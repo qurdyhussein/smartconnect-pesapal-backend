@@ -11,7 +11,7 @@ from .utils import update_booking_status, query_zenopay_payment_status
 load_dotenv()
 
 ZENOPAY_API_KEY = os.getenv("ZENOPAY_API_KEY")
-WEBHOOK_SECRET = os.getenv("ZENOPAY_API_KEY")  # Same key used to verify webhook
+WEBHOOK_SECRET = ZENOPAY_API_KEY  # Same key used to verify webhook
 
 # 🧾 Step 1: Initiate Zenopay Payment
 @api_view(['POST'])
@@ -40,7 +40,7 @@ def initiate_zenopay_payment(request):
             "buyer_name": buyer_name,
             "buyer_phone": phone,
             "amount": amount,
-            "webhook_url": "https://smartconnect-api.onrender.com/zenopay/webhook"
+            "webhook_url": "https://smartconnect-pesapal-api.onrender.com/zenopay/webhook"
         }
 
         print("📦 Sending to Zenopay:", json.dumps(payload, indent=2))
@@ -58,6 +58,7 @@ def initiate_zenopay_payment(request):
         })
 
     except Exception as e:
+        print(f"❌ Initiation error: {e}")
         return Response({"error": str(e)}, status=500)
 
 
