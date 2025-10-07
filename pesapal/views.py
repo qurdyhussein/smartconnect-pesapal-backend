@@ -2,15 +2,13 @@ import os
 import uuid
 import json
 import requests
-from dotenv import load_dotenv
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import JsonResponse
 from .utils import update_booking_status, query_zenopay_payment_status
 
-load_dotenv()
-
-ZENOPAY_API_KEY = os.getenv("ZENOPAY_API_KEY")
+# 🔐 Load API key from Render environment
+ZENOPAY_API_KEY = os.environ.get("ZENOPAY_API_KEY")
 WEBHOOK_SECRET = ZENOPAY_API_KEY  # Same key used to verify webhook
 
 # 🧾 Step 1: Initiate Zenopay Payment
@@ -43,6 +41,7 @@ def initiate_zenopay_payment(request):
             "webhook_url": "https://smartconnect-pesapal-api.onrender.com/zenopay/webhook"
         }
 
+        print("🔑 ZENOPAY_API_KEY:", ZENOPAY_API_KEY)
         print("📦 Sending to Zenopay:", json.dumps(payload, indent=2))
 
         res = requests.post("https://zenoapi.com/api/payments/mobile_money_tanzania", headers=headers, json=payload)
