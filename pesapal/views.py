@@ -97,7 +97,7 @@ def zenopay_webhook(request):
         return Response({"error": "Internal server error"}, status=500)
 
 
-# ✅ Step 3: Manual Status Check
+# ✅ Step 3: Manual Status Check (with normalization)
 @api_view(['GET'])
 def check_zenopay_status(request, order_id):
     try:
@@ -112,9 +112,13 @@ def check_zenopay_status(request, order_id):
 
         print("📊 Status check response:", status_data)
 
+        # Normalize Zenopay status
+        raw_status = status_data.get("result")
+        normalized_status = "COMPLETED" if raw_status == "SUCCESS" else raw_status
+
         return JsonResponse({
             "order_id": order_id,
-            "status": status_data.get("result"),
+            "status": normalized_status,
             "details": status_data.get("data", [])
         })
 
