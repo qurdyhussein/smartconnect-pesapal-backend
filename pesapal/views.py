@@ -104,39 +104,57 @@ def zenopay_webhook(request):
         return Response({"error": "Internal server error"}, status=500)
 
 
-# ✅ Step 3: Manual Status Check (with normalization)
+# ✅ Step 3: Manual Status Check (with retry + fallback)
 @api_view(['GET'])
 def check_zenopay_status(request, order_id):
-    try:
-        headers = {
-            "x-api-key": ZENOPAY_API_KEY
-        }
+    headers = {
+        "x-api-key": ZENOPAY_API_KEY
+    }
 
-        url = f"https://zenoapi.com/api/payments/order-status?order_id={order_id}"
-        res = requests.get(url, headers=headers, timeout=10)
-        print("📊 Raw status response:", res.status_code, res.text)
-        res.raise_for_status()
-        status_data = res.json()
+    url = f"https://zenoapi.com/api/payments/order-status?order_id={order_id}"
+    attempts = 0
+    max_attempts = 3
+    last_error = None
 
-        print("📊 Parsed status response:", status_data)
+    while attempts < max_attempts:
+        try:
+            print(f"🔁 Attempt {attempts + 1} → Checking status for {order_id}")
+            res = requests.get(url, headers=headers, timeout=10)
+            print("📊 Raw status response:", res.status_code, res.text)
+            res.raise_for_status()
+            status_data = res.json()
+            print("📊 Parsed status response:", status_data)
 
-        raw_status = status_data.get("result")
-        details = status_data.get("data", [])
-        payment_status = details[0].get("payment_status") if details else None
+            raw_status = status_data.get("result")
+            details = status_data.get("data", [])
+            payment_status = details[0].get("payment_status") if details else None
 
-        if raw_status == "SUCCESS" and payment_status == "COMPLETED":
-            normalized_status = "COMPLETED"
-        elif payment_status == "PENDING":
-            normalized_status = "PENDING"
-        else:
-            normalized_status = "FAIL"
+            if raw_status == "SUCCESS" and payment_status == "COMPLETED":
+                normalized_status = "COMPLETED"
+            elif payment_status == "PENDING":
+                normalized_status = "PENDING"
+            else:
+                normalized_status = "FAIL"
 
-        return JsonResponse({
-            "order_id": order_id,
-            "status": normalized_status,
-            "details": details
-        })
+            return JsonResponse({
+                "order_id": order_id,
+                "status": normalized_status,
+                "details": details
+            })
 
-    except Exception as e:
-        print(f"❌ Status check error: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
+        except requests.exceptions.Timeout:
+            print(f"⏳ Timeout on attempt {attempts + 1}")
+            last_error = "Timeout"
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Request error on attempt {attempts + 1}: {e}")
+            last_error = str(e)
+
+        attempts += 1
+
+    # Fallback response after retries
+    print(f"⚠️ All attempts failed for {order_id}. Returning fallback status.")
+    return JsonResponse({
+        "order_id": order_id,
+        "status": "UNKNOWN",
+        "error": last_error
+    }, status=200)
