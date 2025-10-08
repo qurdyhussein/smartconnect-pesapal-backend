@@ -5,11 +5,10 @@ import requests
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import JsonResponse
-from .utils import update_booking_status, query_zenopay_payment_status
+from .utils import update_booking_status
 
-# 🔐 Load API key from Render environment
 ZENOPAY_API_KEY = os.environ.get("ZENOPAY_API_KEY")
-WEBHOOK_SECRET = ZENOPAY_API_KEY  # Same key used to verify webhook
+WEBHOOK_SECRET = ZENOPAY_API_KEY
 
 # 🧾 Step 1: Initiate Zenopay Payment
 @api_view(['POST'])
@@ -25,7 +24,7 @@ def initiate_zenopay_payment(request):
         if not phone or not amount:
             return Response({"error": "Missing phone or amount"}, status=400)
 
-        order_id = str(uuid.uuid4())  # Unique transaction ID
+        order_id = str(uuid.uuid4())
 
         headers = {
             "Content-Type": "application/json",
@@ -41,9 +40,6 @@ def initiate_zenopay_payment(request):
             "webhook_url": "https://smartconnect-pesapal-api.onrender.com/zenopay/webhook"
         }
 
-        print("🔑 ZENOPAY_API_KEY:", ZENOPAY_API_KEY)
-        print("📦 Sending to Zenopay:", json.dumps(payload, indent=2))
-
         res = requests.post(
             "https://zenoapi.com/api/payments/mobile_money_tanzania",
             headers=headers,
@@ -51,11 +47,8 @@ def initiate_zenopay_payment(request):
             timeout=15
         )
 
-        print("📥 Zenopay raw response:", res.status_code, res.text)
         res.raise_for_status()
         response_data = res.json()
-
-        print("✅ Zenopay parsed response:", response_data)
 
         return Response({
             "status": "initiated",
@@ -64,7 +57,6 @@ def initiate_zenopay_payment(request):
         })
 
     except Exception as e:
-        print(f"❌ Initiation error: {e}")
         return Response({"error": str(e)}, status=500)
 
 
@@ -72,9 +64,6 @@ def initiate_zenopay_payment(request):
 @api_view(['POST'])
 def zenopay_webhook(request):
     try:
-        print("📨 Webhook received:", request.data)
-
-        # Verify x-api-key header
         incoming_key = request.headers.get("x-api-key")
         if incoming_key != WEBHOOK_SECRET:
             return Response({"error": "Unauthorized webhook"}, status=403)
@@ -100,11 +89,10 @@ def zenopay_webhook(request):
         return Response({"status": "received", "order_id": order_id})
 
     except Exception as e:
-        print(f"❌ Webhook error: {e}")
         return Response({"error": "Internal server error"}, status=500)
 
 
-# ✅ Step 3: Manual Status Check (with retry + fallback)
+# ✅ Step 3: Manual Status Check
 @api_view(['GET'])
 def check_zenopay_status(request, order_id):
     headers = {
@@ -118,12 +106,9 @@ def check_zenopay_status(request, order_id):
 
     while attempts < max_attempts:
         try:
-            print(f"🔁 Attempt {attempts + 1} → Checking status for {order_id}")
             res = requests.get(url, headers=headers, timeout=10)
-            print("📊 Raw status response:", res.status_code, res.text)
             res.raise_for_status()
             status_data = res.json()
-            print("📊 Parsed status response:", status_data)
 
             raw_status = status_data.get("result")
             details = status_data.get("data", [])
@@ -143,16 +128,12 @@ def check_zenopay_status(request, order_id):
             })
 
         except requests.exceptions.Timeout:
-            print(f"⏳ Timeout on attempt {attempts + 1}")
             last_error = "Timeout"
         except requests.exceptions.RequestException as e:
-            print(f"❌ Request error on attempt {attempts + 1}: {e}")
             last_error = str(e)
 
         attempts += 1
 
-    # Fallback response after retries
-    print(f"⚠️ All attempts failed for {order_id}. Returning fallback status.")
     return JsonResponse({
         "order_id": order_id,
         "status": "UNKNOWN",
