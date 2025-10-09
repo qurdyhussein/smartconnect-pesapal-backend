@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from django.http import JsonResponse
 from .utils import update_booking_status
 
+# 🔑 Env keys
 ZENOPAY_API_KEY = os.environ.get("ZENOPAY_API_KEY")
 WEBHOOK_SECRET = os.environ.get("ZENOPAY_WEBHOOK_SECRET", ZENOPAY_API_KEY)  # fallback
 
@@ -24,6 +25,12 @@ def initiate_zenopay_payment(request):
 
         if not phone or not amount:
             return Response({"error": "Missing phone or amount"}, status=400)
+
+        # Ensure amount is integer
+        try:
+            amount = int(amount)
+        except (ValueError, TypeError):
+            return Response({"error": "Invalid amount"}, status=400)
 
         order_id = str(uuid.uuid4())
 
@@ -48,8 +55,17 @@ def initiate_zenopay_payment(request):
             timeout=15
         )
 
-        res.raise_for_status()
-        response_data = res.json()
+        # Safe JSON parsing
+        try:
+            response_data = res.json()
+        except ValueError:
+            response_data = {"raw_response": res.text}
+
+        if res.status_code != 200:
+            return Response({
+                "error": f"Zenopay returned {res.status_code}",
+                "response": response_data
+            }, status=res.status_code)
 
         return Response({
             "status": "initiated",
@@ -69,17 +85,22 @@ def zenopay_webhook(request):
         incoming_key = request.headers.get("x-api-key")
         print("🔐 Incoming x-api-key:", incoming_key)
 
-        # ✅ Ruhusu kama key haipo lakini status ni COMPLETED
         if incoming_key != WEBHOOK_SECRET and incoming_key is not None:
             print("❌ Webhook rejected: invalid x-api-key")
             return Response({"error": "Unauthorized webhook"}, status=403)
 
-        order_id = request.data.get("order_id")
-        status = request.data.get("payment_status_description") or request.data.get("payment_status")
-        method = request.data.get("payment_method")
-        code = request.data.get("confirmation_code") or request.data.get("reference")
-        channel = request.data.get("channel")
-        transid = request.data.get("transid")
+        # Ensure JSON parsing
+        try:
+            data = json.loads(request.body)
+        except ValueError:
+            return Response({"error": "Invalid JSON"}, status=400)
+
+        order_id = data.get("order_id")
+        status = data.get("payment_status_description") or data.get("payment_status")
+        method = data.get("payment_method")
+        code = data.get("confirmation_code") or data.get("reference")
+        channel = data.get("channel")
+        transid = data.get("transid")
 
         if not order_id or not status:
             return Response({"error": "Missing order_id or payment_status"}, status=400)
@@ -98,6 +119,7 @@ def zenopay_webhook(request):
         print("🔥 Webhook error:", str(e))
         return Response({"error": "Internal server error"}, status=500)
 
+
 # ✅ Step 3: Manual Status Check
 @api_view(['GET'])
 def check_zenopay_status(request, order_id):
@@ -113,16 +135,23 @@ def check_zenopay_status(request, order_id):
     while attempts < max_attempts:
         try:
             res = requests.get(url, headers=headers, timeout=10)
-            res.raise_for_status()
-            status_data = res.json()
+            try:
+                status_data = res.json()
+            except ValueError:
+                status_data = {"raw_response": res.text}
 
+            # Safe parsing
             raw_status = status_data.get("result")
             details = status_data.get("data", [])
-            payment_status = details[0].get("payment_status") if details else None
+            payment_status = None
+            if details and isinstance(details, list):
+                first = details[0]
+                if isinstance(first, dict):
+                    payment_status = first.get("payment_status")
 
             if raw_status == "SUCCESS" and payment_status == "COMPLETED":
                 normalized_status = "COMPLETED"
-            elif payment_status == "PENDING":
+            elif payment_status in ["PENDING", "INITIATED", "PROCESSING"]:
                 normalized_status = "PENDING"
             else:
                 normalized_status = "FAIL"
