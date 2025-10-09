@@ -1,6 +1,30 @@
 import os
+import json
 import requests
 from .models import Booking
+
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# ✅ Initialize Firebase once globally
+if not firebase_admin._apps:
+    firebase_key_json = os.getenv("FIREBASE_KEY")
+
+    if firebase_key_json:
+        try:
+            cred_dict = json.loads(firebase_key_json)
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
+            db = firestore.client()
+            print("🔥 Firebase connected successfully.")
+        except Exception as e:
+            print(f"❌ Error initializing Firebase: {e}")
+            db = None
+    else:
+        print("⚠️ FIREBASE_KEY not found in environment variables.")
+        db = None
+else:
+    db = firestore.client()
 
 def update_booking_status(reference, status_data):
     try:
@@ -24,6 +48,23 @@ def update_booking_status(reference, status_data):
         booking.save()
 
         print(f"✅ Booking {reference} updated to {status}")
+
+        # 🔥 Sync to Firestore (optional but powerful)
+        if db:
+            try:
+                doc_ref = db.collection("bookings").document(reference)
+                doc_ref.set({
+                    "reference": reference,
+                    "status": status,
+                    "payment_method": method,
+                    "transaction_id": transid or code,
+                    "channel": channel,
+                }, merge=True)
+                print(f"📡 Firestore updated for booking {reference}")
+            except Exception as e:
+                print(f"⚠️ Error writing to Firestore: {e}")
+        else:
+            print("⚠️ Firestore not initialized, skipping sync.")
 
     except Booking.DoesNotExist:
         print(f"⚠️ Booking with reference {reference} not found.")
