@@ -7,4 +7,6 @@ python-decouple==3.8
 psycopg2-binary==2.9.9
 python-dotenv==1.0.0
 dj-database-url==1.0.0
+firebase-admin>=6.0.0
+
 # Force rebuild
