@@ -2,13 +2,14 @@ import os
 import uuid
 import json
 import requests
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import JsonResponse
 from .utils import update_booking_status
 
 ZENOPAY_API_KEY = os.environ.get("ZENOPAY_API_KEY")
-WEBHOOK_SECRET = ZENOPAY_API_KEY
+WEBHOOK_SECRET = os.environ.get("ZENOPAY_WEBHOOK_SECRET", ZENOPAY_API_KEY)  # fallback
 
 # 🧾 Step 1: Initiate Zenopay Payment
 @api_view(['POST'])
@@ -61,11 +62,15 @@ def initiate_zenopay_payment(request):
 
 
 # 📡 Step 2: Webhook Handler
+@csrf_exempt
 @api_view(['POST'])
 def zenopay_webhook(request):
     try:
         incoming_key = request.headers.get("x-api-key")
+        print("🔐 Incoming x-api-key:", incoming_key)
+
         if incoming_key != WEBHOOK_SECRET:
+            print("❌ Webhook rejected: invalid x-api-key")
             return Response({"error": "Unauthorized webhook"}, status=403)
 
         order_id = request.data.get("order_id")
@@ -89,6 +94,7 @@ def zenopay_webhook(request):
         return Response({"status": "received", "order_id": order_id})
 
     except Exception as e:
+        print("🔥 Webhook error:", str(e))
         return Response({"error": "Internal server error"}, status=500)
 
 
