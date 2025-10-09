@@ -37,7 +37,7 @@ def initiate_zenopay_payment(request):
             "buyer_name": buyer_name,
             "buyer_phone": phone,
             "amount": amount,
-            "webhook_url": "https://smartconnect-pesapal-api.onrender.com/zenopay/webhook/"
+            "webhook_url": "https://smartconnect-pesapal-api.onrender.com/api/zenopay/webhook/"
         }
 
         res = requests.post(
