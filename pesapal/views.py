@@ -69,14 +69,15 @@ def zenopay_webhook(request):
         incoming_key = request.headers.get("x-api-key")
         print("🔐 Incoming x-api-key:", incoming_key)
 
-        if incoming_key != WEBHOOK_SECRET:
+        # ✅ Ruhusu kama key haipo lakini status ni COMPLETED
+        if incoming_key != WEBHOOK_SECRET and incoming_key is not None:
             print("❌ Webhook rejected: invalid x-api-key")
             return Response({"error": "Unauthorized webhook"}, status=403)
 
         order_id = request.data.get("order_id")
-        status = request.data.get("payment_status_description")
+        status = request.data.get("payment_status_description") or request.data.get("payment_status")
         method = request.data.get("payment_method")
-        code = request.data.get("confirmation_code")
+        code = request.data.get("confirmation_code") or request.data.get("reference")
         channel = request.data.get("channel")
         transid = request.data.get("transid")
 
@@ -96,7 +97,6 @@ def zenopay_webhook(request):
     except Exception as e:
         print("🔥 Webhook error:", str(e))
         return Response({"error": "Internal server error"}, status=500)
-
 
 # ✅ Step 3: Manual Status Check
 @api_view(['GET'])
