@@ -1,3 +1,4 @@
+from enum import auto
 import os
 import uuid
 import json
@@ -9,6 +10,7 @@ from django.http import JsonResponse
 from .utils import update_booking_status, query_zenopay_payment_status
 import firebase_admin
 from firebase_admin import credentials, firestore
+from firebase_admin import auth
 
 # 🔑 Init Firebase
 if not firebase_admin._apps:
@@ -221,3 +223,37 @@ def zenopay_webhook(request):
 def check_zenopay_status(request, order_id):
     result = query_zenopay_payment_status(order_id)
     return JsonResponse(result)
+
+
+
+
+@csrf_exempt
+@api_view(['POST'])
+def reset_password(request):
+    try:
+        data = request.data
+        uid = data.get('uid')
+        new_password = data.get('new_password')
+
+        if not uid or not new_password:
+            return Response({'success': False, 'message': 'Missing uid or password'}, status=400)
+
+        if len(new_password) < 6:
+            return Response({'success': False, 'message': 'Password too short'}, status=400)
+
+        # ✅ Update password via Firebase Admin SDK
+        auth.update_user(uid, password=new_password)
+
+        # ✅ Optional: Log reset event to Firestore
+        db.collection('password_resets').add({
+            'uid': uid,
+            'new_password_length': len(new_password),
+            'reset_at': firestore.SERVER_TIMESTAMP,
+            'source': 'SmartConnect Mobile',
+        })
+
+        print(f"🔐 Password reset for UID: {uid}")
+        return Response({'success': True})
+    except Exception as e:
+        print("🔥 Password reset error:", str(e))
+        return Response({'success': False, 'message': str(e)}, status=500)
