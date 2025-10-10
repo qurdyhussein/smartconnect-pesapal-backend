@@ -36,6 +36,7 @@ def initiate_zenopay_payment(request):
         package = data.get("package")
         network = data.get("network")
         channel = data.get("channel") or network
+        payment_method = data.get("payment_method", "unspecified")
 
         if not phone or not amount:
             return Response({"error": "Missing phone or amount"}, status=400)
@@ -57,6 +58,7 @@ def initiate_zenopay_payment(request):
             "package": package,
             "network": network,
             "channel": channel,
+            "payment_method": payment_method,
             "status": "INITIATED",
             "created_at": firestore.SERVER_TIMESTAMP
         })
@@ -159,6 +161,17 @@ def zenopay_webhook(request):
             "transid": transid,
             "updated_at": firestore.SERVER_TIMESTAMP
         })
+
+        # ✅ Fallback: If channel or transid are missing, trigger manual check
+        if channel == "unknown" or transid == "pending":
+            fallback = query_zenopay_payment_status(order_id)
+            transaction_ref.update({
+                "channel": fallback.get("channel", channel),
+                "transid": fallback.get("transid", transid),
+                "confirmation_code": fallback.get("confirmation_code", code),
+                "payment_method": fallback.get("payment_method", method),
+                "checked_at": firestore.SERVER_TIMESTAMP
+            })
 
         if status.upper() == "COMPLETED":
             transaction_doc = transaction_ref.get()

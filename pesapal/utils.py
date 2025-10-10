@@ -101,14 +101,17 @@ def query_zenopay_payment_status(order_id):
             else "FAIL"
         )
 
-        firebase_db.collection('transactions').document(order_id).update({
+        update_data = {
             "status": normalized_status,
             "transid": transid,
             "confirmation_code": code,
             "payment_method": method,
             "channel": channel,
             "checked_at": firestore.SERVER_TIMESTAMP
-        })
+        }
+
+        firebase_db.collection('transactions').document(order_id).update(update_data)
+        print(f"✅ Fallback update for {order_id} → {normalized_status}")
 
         return {
             "order_id": order_id,
