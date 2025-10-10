@@ -6,7 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import JsonResponse
-from .utils import update_booking_status
+from .utils import update_booking_status, query_zenopay_payment_status
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -23,6 +23,7 @@ db = firestore.client()
 ZENOPAY_API_KEY = os.environ.get("ZENOPAY_API_KEY")
 WEBHOOK_SECRET = os.environ.get("ZENOPAY_WEBHOOK_SECRET", ZENOPAY_API_KEY)
 
+# ✅ Step 1: Initiate Payment
 @api_view(['POST'])
 def initiate_zenopay_payment(request):
     try:
@@ -34,7 +35,7 @@ def initiate_zenopay_payment(request):
         customer_id = data.get("customer_id", "unknown")
         package = data.get("package")
         network = data.get("network")
-        channel = data.get("channel") or network  # fallback
+        channel = data.get("channel") or network
 
         if not phone or not amount:
             return Response({"error": "Missing phone or amount"}, status=400)
@@ -112,6 +113,7 @@ def initiate_zenopay_payment(request):
         print("🔥 Initiate error:", str(e))
         return Response({"error": str(e)}, status=500)
 
+# ✅ Step 2: Webhook Handler
 @csrf_exempt
 @api_view(['POST'])
 def zenopay_webhook(request):
@@ -200,3 +202,9 @@ def zenopay_webhook(request):
     except Exception as e:
         print("🔥 Webhook error:", str(e))
         return Response({"error": "Internal server error"}, status=500)
+
+# ✅ Step 3: Manual Status Check
+@api_view(['GET'])
+def check_zenopay_status(request, order_id):
+    result = query_zenopay_payment_status(order_id)
+    return JsonResponse(result)
