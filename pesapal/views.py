@@ -34,6 +34,8 @@ def initiate_zenopay_payment(request):
         buyer_name = data.get("buyer_name", "SmartConnect User")
         buyer_email = data.get("buyer_email", "user@smartconnect.tz")
         customer_id = data.get("customer_id", "unknown")
+        package = data.get("package")
+        network = data.get("network")
 
         if not phone or not amount:
             return Response({"error": "Missing phone or amount"}, status=400)
@@ -53,6 +55,8 @@ def initiate_zenopay_payment(request):
             "buyer_name": buyer_name,
             "buyer_email": buyer_email,
             "customer_id": customer_id,
+            "package": package,
+            "network": network,
             "status": "INITIATED",
             "created_at": firestore.SERVER_TIMESTAMP
         })
@@ -108,8 +112,7 @@ def initiate_zenopay_payment(request):
         print("🔥 Initiate error:", str(e))
         return Response({"error": str(e)}, status=500)
 
-# 📡 Step 2: Webhook Handler
-# 📡 Step 2: Webhook Handler
+
 @csrf_exempt
 @api_view(['POST'])
 def zenopay_webhook(request):
@@ -163,9 +166,9 @@ def zenopay_webhook(request):
             network = transaction_data.get("network")
 
             voucher_query = db.collection('vouchers')\
-                .where('status', '==', 'available')\
-                .where('package', '==', package)\
-                .where('network', '==', network)\
+                .filter('status', '==', 'available')\
+                .filter('package', '==', package)\
+                .filter('network', '==', network)\
                 .limit(1)\
                 .stream()
 
@@ -196,6 +199,7 @@ def zenopay_webhook(request):
     except Exception as e:
         print("🔥 Webhook error:", str(e))
         return Response({"error": "Internal server error"}, status=500)
+    
     
 # ✅ Step 3: Manual Status Check
 @api_view(['GET'])
