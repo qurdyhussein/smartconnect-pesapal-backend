@@ -7,10 +7,23 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import JsonResponse
 from .utils import update_booking_status
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# 🔑 Init Firebase
+if not firebase_admin._apps:
+    cred_path = os.environ.get("FIREBASE_KEY_PATH", "/etc/secrets/firebase.json")
+    if os.path.exists(cred_path):
+        cred = credentials.Certificate(cred_path)
+        firebase_admin.initialize_app(cred)
+    else:
+        firebase_admin.initialize_app()
+db = firestore.client()
 
 # 🔑 Env keys
 ZENOPAY_API_KEY = os.environ.get("ZENOPAY_API_KEY")
 WEBHOOK_SECRET = os.environ.get("ZENOPAY_WEBHOOK_SECRET", ZENOPAY_API_KEY)  # fallback
+
 
 # 🧾 Step 1: Initiate Zenopay Payment
 @api_view(['POST'])
@@ -33,6 +46,18 @@ def initiate_zenopay_payment(request):
             return Response({"error": "Invalid amount"}, status=400)
 
         order_id = str(uuid.uuid4())
+
+        # ✅ Hifadhi transaction kwenye Firestore mara moja
+        db.collection('transactions').document(order_id).set({
+            "order_id": order_id,
+            "phone": phone,
+            "amount": amount,
+            "buyer_name": buyer_name,
+            "buyer_email": buyer_email,
+            "customer_id": customer_id,
+            "status": "INITIATED",
+            "created_at": firestore.SERVER_TIMESTAMP
+        })
 
         headers = {
             "Content-Type": "application/json",
@@ -62,10 +87,21 @@ def initiate_zenopay_payment(request):
             response_data = {"raw_response": res.text}
 
         if res.status_code != 200:
+            # ❗Update Firestore with failure info
+            db.collection('transactions').document(order_id).update({
+                "status": "FAILED",
+                "error": response_data
+            })
             return Response({
                 "error": f"Zenopay returned {res.status_code}",
                 "response": response_data
             }, status=res.status_code)
+
+        # ✅ Update Firestore kwa response ya kwanza
+        db.collection('transactions').document(order_id).update({
+            "status": "PENDING",
+            "zenopay_response": response_data
+        })
 
         return Response({
             "status": "initiated",
@@ -74,6 +110,7 @@ def initiate_zenopay_payment(request):
         })
 
     except Exception as e:
+        print("🔥 Initiate error:", str(e))
         return Response({"error": str(e)}, status=500)
 
 
@@ -113,6 +150,17 @@ def zenopay_webhook(request):
             "transid": transid
         })
 
+        # ✅ Pia update Firestore status
+        db.collection('transactions').document(order_id).update({
+            "status": status.upper(),
+            "payment_method": method,
+            "confirmation_code": code,
+            "channel": channel,
+            "transid": transid,
+            "updated_at": firestore.SERVER_TIMESTAMP
+        })
+
+        print(f"✅ Webhook processed for order {order_id} - {status}")
         return Response({"status": "received", "order_id": order_id})
 
     except Exception as e:
@@ -155,6 +203,12 @@ def check_zenopay_status(request, order_id):
                 normalized_status = "PENDING"
             else:
                 normalized_status = "FAIL"
+
+            # ✅ Update Firestore pia
+            db.collection('transactions').document(order_id).update({
+                "status": normalized_status,
+                "checked_at": firestore.SERVER_TIMESTAMP
+            })
 
             return JsonResponse({
                 "order_id": order_id,

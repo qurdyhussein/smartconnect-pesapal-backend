@@ -1,84 +1,76 @@
 import os
 import json
 import requests
-from .models import Booking
-
 import firebase_admin
 from firebase_admin import credentials, firestore
 
 # ✅ Initialize Firebase once globally
 if not firebase_admin._apps:
     firebase_key_json = os.getenv("FIREBASE_KEY")
-
     if firebase_key_json:
         try:
             cred_dict = json.loads(firebase_key_json)
             cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred)
-            db = firestore.client()
             print("🔥 Firebase connected successfully.")
         except Exception as e:
             print(f"❌ Error initializing Firebase: {e}")
-            db = None
     else:
         print("⚠️ FIREBASE_KEY not found in environment variables.")
-        db = None
-else:
-    db = firestore.client()
+firebase_db = firestore.client()
 
-def update_booking_status(reference, status_data):
+
+def update_booking_status(order_id, status_data):
+    """
+    ✅ Update transaction status directly in Firestore.
+    Called automatically by Zenopay webhook or manual status check.
+    """
     try:
-        booking = Booking.objects.get(reference=reference)
-
-        status = status_data.get("payment_status_description")
+        status = status_data.get("payment_status_description") or status_data.get("payment_status")
         method = status_data.get("payment_method")
         code = status_data.get("confirmation_code")
         channel = status_data.get("channel")
         transid = status_data.get("transid")
 
-        # Avoid duplicate updates
-        if booking.status == status:
-            print(f"🔁 Booking {reference} already marked as {status}")
+        if not firebase_db:
+            print("⚠️ Firestore not initialized. Skipping update.")
             return
 
-        booking.status = status
-        booking.payment_method = method
-        booking.transaction_id = transid or code
-        booking.channel = channel
-        booking.save()
+        doc_ref = firebase_db.collection("transactions").document(order_id)
+        doc = doc_ref.get()
 
-        print(f"✅ Booking {reference} updated to {status}")
+        update_data = {
+            "status": status.upper() if status else "UNKNOWN",
+            "payment_method": method,
+            "confirmation_code": code,
+            "channel": channel,
+            "transid": transid,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
 
-        # 🔥 Sync to Firestore (optional but powerful)
-        if db:
-            try:
-                doc_ref = db.collection("bookings").document(reference)
-                doc_ref.set({
-                    "reference": reference,
-                    "status": status,
-                    "payment_method": method,
-                    "transaction_id": transid or code,
-                    "channel": channel,
-                }, merge=True)
-                print(f"📡 Firestore updated for booking {reference}")
-            except Exception as e:
-                print(f"⚠️ Error writing to Firestore: {e}")
+        if doc.exists:
+            doc_ref.update(update_data)
+            print(f"✅ Transaction {order_id} updated to {status}")
         else:
-            print("⚠️ Firestore not initialized, skipping sync.")
+            # If the transaction doesn't exist (maybe webhook came first)
+            doc_ref.set({
+                "order_id": order_id,
+                **update_data,
+                "created_at": firestore.SERVER_TIMESTAMP
+            })
+            print(f"🆕 Created new transaction {order_id} with status {status}")
 
-    except Booking.DoesNotExist:
-        print(f"⚠️ Booking with reference {reference} not found.")
+    except Exception as e:
+        print(f"🔥 Error updating Firestore transaction {order_id}: {e}")
 
-def query_zenopay_payment_status(reference):
-    booking = Booking.objects.filter(reference=reference).first()
-    if not booking:
-        return "not_found"
 
+def query_zenopay_payment_status(order_id):
+    """
+    ✅ Query Zenopay API manually and return payment result.
+    """
     ZENOPAY_API_KEY = os.getenv("ZENOPAY_API_KEY")
-    url = f"https://zenoapi.com/api/payments/order-status?order_id={reference}"
-    headers = {
-        "x-api-key": ZENOPAY_API_KEY
-    }
+    url = f"https://zenoapi.com/api/payments/order-status?order_id={order_id}"
+    headers = {"x-api-key": ZENOPAY_API_KEY}
 
     try:
         response = requests.get(url, headers=headers)
@@ -87,4 +79,4 @@ def query_zenopay_payment_status(reference):
         return data.get("result", "UNKNOWN")
     except Exception as e:
         print(f"❌ Error checking Zenopay status: {e}")
-        return "error"
+        return "ERROR"
