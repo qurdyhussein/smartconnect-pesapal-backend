@@ -166,9 +166,9 @@ def zenopay_webhook(request):
             network = transaction_data.get("network")
 
             voucher_query = db.collection('vouchers')\
-                .filter('status', '==', 'available')\
-                .filter('package', '==', package)\
-                .filter('network', '==', network)\
+                .where('status', '==', 'available')\
+                .where('package', '==', package)\
+                .where('network', '==', network)\
                 .limit(1)\
                 .stream()
 
