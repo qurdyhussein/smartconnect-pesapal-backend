@@ -24,7 +24,6 @@ db = firestore.client()
 ZENOPAY_API_KEY = os.environ.get("ZENOPAY_API_KEY")
 WEBHOOK_SECRET = os.environ.get("ZENOPAY_WEBHOOK_SECRET", ZENOPAY_API_KEY)  # fallback
 
-
 # 🧾 Step 1: Initiate Zenopay Payment
 @api_view(['POST'])
 def initiate_zenopay_payment(request):
@@ -39,7 +38,6 @@ def initiate_zenopay_payment(request):
         if not phone or not amount:
             return Response({"error": "Missing phone or amount"}, status=400)
 
-        # Ensure amount is integer
         try:
             amount = int(amount)
         except (ValueError, TypeError):
@@ -47,7 +45,7 @@ def initiate_zenopay_payment(request):
 
         order_id = str(uuid.uuid4())
 
-        # ✅ Hifadhi transaction kwenye Firestore mara moja
+        # ✅ Save transaction to Firestore
         db.collection('transactions').document(order_id).set({
             "order_id": order_id,
             "phone": phone,
@@ -80,14 +78,12 @@ def initiate_zenopay_payment(request):
             timeout=15
         )
 
-        # Safe JSON parsing
         try:
             response_data = res.json()
         except ValueError:
             response_data = {"raw_response": res.text}
 
         if res.status_code != 200:
-            # ❗Update Firestore with failure info
             db.collection('transactions').document(order_id).update({
                 "status": "FAILED",
                 "error": response_data
@@ -97,7 +93,6 @@ def initiate_zenopay_payment(request):
                 "response": response_data
             }, status=res.status_code)
 
-        # ✅ Update Firestore kwa response ya kwanza
         db.collection('transactions').document(order_id).update({
             "status": "PENDING",
             "zenopay_response": response_data
@@ -113,7 +108,6 @@ def initiate_zenopay_payment(request):
         print("🔥 Initiate error:", str(e))
         return Response({"error": str(e)}, status=500)
 
-
 # 📡 Step 2: Webhook Handler
 @csrf_exempt
 @api_view(['POST'])
@@ -126,7 +120,6 @@ def zenopay_webhook(request):
             print("❌ Webhook rejected: invalid x-api-key")
             return Response({"error": "Unauthorized webhook"}, status=403)
 
-        # Ensure JSON parsing
         try:
             data = json.loads(request.body)
         except ValueError:
@@ -150,8 +143,8 @@ def zenopay_webhook(request):
             "transid": transid
         })
 
-        # ✅ Pia update Firestore status
-        db.collection('transactions').document(order_id).update({
+        transaction_ref = db.collection('transactions').document(order_id)
+        transaction_ref.update({
             "status": status.upper(),
             "payment_method": method,
             "confirmation_code": code,
@@ -160,13 +153,37 @@ def zenopay_webhook(request):
             "updated_at": firestore.SERVER_TIMESTAMP
         })
 
+        # ✅ Voucher assignment if payment is completed
+        if status.upper() == "COMPLETED":
+            transaction_doc = transaction_ref.get()
+            customer_id = transaction_doc.to_dict().get("customer_id")
+
+            voucher_query = db.collection('vouchers').where('status', '==', 'available').limit(1).stream()
+            voucher_doc = next(voucher_query, None)
+
+            if voucher_doc:
+                voucher_id = voucher_doc.id
+                voucher_ref = db.collection('vouchers').document(voucher_id)
+
+                voucher_ref.update({
+                    'assigned_to': customer_id,
+                    'status': 'assigned',
+                    'assigned_at': firestore.SERVER_TIMESTAMP
+                })
+
+                transaction_ref.update({
+                    'assigned_voucher': voucher_id,
+                    'assigned_at': firestore.SERVER_TIMESTAMP
+                })
+
+                print(f"🎁 Voucher {voucher_id} assigned to {customer_id}")
+
         print(f"✅ Webhook processed for order {order_id} - {status}")
         return Response({"status": "received", "order_id": order_id})
 
     except Exception as e:
         print("🔥 Webhook error:", str(e))
         return Response({"error": "Internal server error"}, status=500)
-
 
 # ✅ Step 3: Manual Status Check
 @api_view(['GET'])
@@ -188,7 +205,6 @@ def check_zenopay_status(request, order_id):
             except ValueError:
                 status_data = {"raw_response": res.text}
 
-            # Safe parsing
             raw_status = status_data.get("result")
             details = status_data.get("data", [])
             payment_status = None
@@ -204,7 +220,6 @@ def check_zenopay_status(request, order_id):
             else:
                 normalized_status = "FAIL"
 
-            # ✅ Update Firestore pia
             db.collection('transactions').document(order_id).update({
                 "status": normalized_status,
                 "checked_at": firestore.SERVER_TIMESTAMP
