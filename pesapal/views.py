@@ -113,6 +113,7 @@ def initiate_zenopay_payment(request):
         return Response({"error": str(e)}, status=500)
 
 
+# 📡 Step 2: Webhook Handler
 @csrf_exempt
 @api_view(['POST'])
 def zenopay_webhook(request):
@@ -131,10 +132,10 @@ def zenopay_webhook(request):
 
         order_id = data.get("order_id")
         status = data.get("payment_status_description") or data.get("payment_status")
-        method = data.get("payment_method")
-        code = data.get("confirmation_code") or data.get("reference")
-        channel = data.get("channel")
-        transid = data.get("transid")
+        method = data.get("payment_method") or "unspecified"
+        code = data.get("confirmation_code") or data.get("reference") or "N/A"
+        channel = data.get("channel") or "unknown"
+        transid = data.get("transid") or "pending"
 
         if not order_id or not status:
             return Response({"error": "Missing order_id or payment_status"}, status=400)
@@ -176,8 +177,10 @@ def zenopay_webhook(request):
 
             if voucher_doc:
                 voucher_id = voucher_doc.id
-                voucher_ref = db.collection('vouchers').document(voucher_id)
+                voucher_data = voucher_doc.to_dict()
+                voucher_code = voucher_data.get("code") or voucher_id
 
+                voucher_ref = db.collection('vouchers').document(voucher_id)
                 voucher_ref.update({
                     'assigned_to': customer_id,
                     'status': 'assigned',
@@ -185,11 +188,11 @@ def zenopay_webhook(request):
                 })
 
                 transaction_ref.update({
-                    'assigned_voucher': voucher_id,
+                    'assigned_voucher': voucher_code,
                     'assigned_at': firestore.SERVER_TIMESTAMP
                 })
 
-                print(f"🎁 Voucher {voucher_id} assigned to {customer_id}")
+                print(f"🎁 Voucher {voucher_code} assigned to {customer_id}")
             else:
                 print(f"⚠️ No available voucher for package={package}, network={network}")
 
@@ -199,8 +202,8 @@ def zenopay_webhook(request):
     except Exception as e:
         print("🔥 Webhook error:", str(e))
         return Response({"error": "Internal server error"}, status=500)
-    
-    
+
+
 # ✅ Step 3: Manual Status Check
 @api_view(['GET'])
 def check_zenopay_status(request, order_id):
