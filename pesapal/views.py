@@ -20,11 +20,9 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app()
 db = firestore.client()
 
-# 🔑 Env keys
 ZENOPAY_API_KEY = os.environ.get("ZENOPAY_API_KEY")
-WEBHOOK_SECRET = os.environ.get("ZENOPAY_WEBHOOK_SECRET", ZENOPAY_API_KEY)  # fallback
+WEBHOOK_SECRET = os.environ.get("ZENOPAY_WEBHOOK_SECRET", ZENOPAY_API_KEY)
 
-# 🧾 Step 1: Initiate Zenopay Payment
 @api_view(['POST'])
 def initiate_zenopay_payment(request):
     try:
@@ -36,6 +34,7 @@ def initiate_zenopay_payment(request):
         customer_id = data.get("customer_id", "unknown")
         package = data.get("package")
         network = data.get("network")
+        channel = data.get("channel") or network  # fallback
 
         if not phone or not amount:
             return Response({"error": "Missing phone or amount"}, status=400)
@@ -47,7 +46,6 @@ def initiate_zenopay_payment(request):
 
         order_id = str(uuid.uuid4())
 
-        # ✅ Save transaction to Firestore
         db.collection('transactions').document(order_id).set({
             "order_id": order_id,
             "phone": phone,
@@ -57,6 +55,7 @@ def initiate_zenopay_payment(request):
             "customer_id": customer_id,
             "package": package,
             "network": network,
+            "channel": channel,
             "status": "INITIATED",
             "created_at": firestore.SERVER_TIMESTAMP
         })
@@ -72,6 +71,7 @@ def initiate_zenopay_payment(request):
             "buyer_name": buyer_name,
             "buyer_phone": phone,
             "amount": amount,
+            "channel": channel,
             "webhook_url": "https://smartconnect-pesapal-api.onrender.com/api/zenopay/webhook/"
         }
 
@@ -112,8 +112,6 @@ def initiate_zenopay_payment(request):
         print("🔥 Initiate error:", str(e))
         return Response({"error": str(e)}, status=500)
 
-
-# 📡 Step 2: Webhook Handler
 @csrf_exempt
 @api_view(['POST'])
 def zenopay_webhook(request):
@@ -130,12 +128,14 @@ def zenopay_webhook(request):
         except ValueError:
             return Response({"error": "Invalid JSON"}, status=400)
 
+        print("📦 Webhook payload:", data)
+
         order_id = data.get("order_id")
         status = data.get("payment_status_description") or data.get("payment_status")
         method = data.get("payment_method") or "unspecified"
         code = data.get("confirmation_code") or data.get("reference") or "N/A"
         channel = data.get("channel") or "unknown"
-        transid = data.get("transid") or "pending"
+        transid = data.get("transid") or data.get("transaction_id") or "pending"
 
         if not order_id or not status:
             return Response({"error": "Missing order_id or payment_status"}, status=400)
@@ -158,7 +158,6 @@ def zenopay_webhook(request):
             "updated_at": firestore.SERVER_TIMESTAMP
         })
 
-        # ✅ Voucher assignment if payment is completed
         if status.upper() == "COMPLETED":
             transaction_doc = transaction_ref.get()
             transaction_data = transaction_doc.to_dict()
@@ -180,8 +179,7 @@ def zenopay_webhook(request):
                 voucher_data = voucher_doc.to_dict()
                 voucher_code = voucher_data.get("code") or voucher_id
 
-                voucher_ref = db.collection('vouchers').document(voucher_id)
-                voucher_ref.update({
+                db.collection('vouchers').document(voucher_id).update({
                     'assigned_to': customer_id,
                     'status': 'assigned',
                     'assigned_at': firestore.SERVER_TIMESTAMP
@@ -202,63 +200,3 @@ def zenopay_webhook(request):
     except Exception as e:
         print("🔥 Webhook error:", str(e))
         return Response({"error": "Internal server error"}, status=500)
-
-
-# ✅ Step 3: Manual Status Check
-@api_view(['GET'])
-def check_zenopay_status(request, order_id):
-    headers = {
-        "x-api-key": ZENOPAY_API_KEY
-    }
-
-    url = f"https://zenoapi.com/api/payments/order-status?order_id={order_id}"
-    attempts = 0
-    max_attempts = 3
-    last_error = None
-
-    while attempts < max_attempts:
-        try:
-            res = requests.get(url, headers=headers, timeout=10)
-            try:
-                status_data = res.json()
-            except ValueError:
-                status_data = {"raw_response": res.text}
-
-            raw_status = status_data.get("result")
-            details = status_data.get("data", [])
-            payment_status = None
-            if details and isinstance(details, list):
-                first = details[0]
-                if isinstance(first, dict):
-                    payment_status = first.get("payment_status")
-
-            if raw_status == "SUCCESS" and payment_status == "COMPLETED":
-                normalized_status = "COMPLETED"
-            elif payment_status in ["PENDING", "INITIATED", "PROCESSING"]:
-                normalized_status = "PENDING"
-            else:
-                normalized_status = "FAIL"
-
-            db.collection('transactions').document(order_id).update({
-                "status": normalized_status,
-                "checked_at": firestore.SERVER_TIMESTAMP
-            })
-
-            return JsonResponse({
-                "order_id": order_id,
-                "status": normalized_status,
-                "details": details
-            })
-
-        except requests.exceptions.Timeout:
-            last_error = "Timeout"
-        except requests.exceptions.RequestException as e:
-            last_error = str(e)
-
-        attempts += 1
-
-    return JsonResponse({
-        "order_id": order_id,
-        "status": "UNKNOWN",
-        "error": last_error
-    }, status=200)
